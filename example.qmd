@@ -1,0 +1,86 @@
+---
+title: "quarto-notes-filter example"
+format: html
+filters:
+  - quarto-notes-filter
+bibliography: references.bib
+bibliographystyle: chicago-author-date
+number-sections: true
+---
+
+This example demonstrates the `quarto-notes-filter` extension across the
+three supported output formats. Render it with any of:
+
+```bash
+quarto render example.qmd --to html
+quarto render example.qmd --to pdf
+quarto render example.qmd --to typst
+```
+
+# Basic usage {#sec-basic}
+
+Add a `fig-notes` attribute to any figure and an AER-style "Notes:" line
+is rendered below the caption. The source for @fig-elephant below is:
+
+```markdown
+![A caption goes here.](elephant.png){#fig-elephant
+  fig-notes="Figure produced following the literate-programming approach
+  of @knuth1984 and typeset with @lamport1994. The shaded area is
+  illustrative."
+  width=60%}
+```
+
+which renders as:
+
+![A caption goes here.](https://quarto.org/docs/authoring/elephant.png){#fig-elephant
+  fig-notes="Figure produced following the literate-programming approach of @knuth1984 and typeset with @lamport1994. The shaded area is illustrative."
+  width=60%}
+
+See @fig-elephant.
+
+# Cross-references and citations work inside notes {#sec-refs}
+
+The `fig-notes` content is parsed as Markdown and runs through Quarto's
+usual citeproc + crossref pipeline, so you can use `@sec-x`, `@fig-x`,
+and `@cite-key` inside notes just like in regular text:
+
+```markdown
+![A second figure.](elephant.png){#fig-elephant2
+  fig-notes="Replication of @fig-elephant from @sec-basic, following
+  @knuth1984. See @sec-options for available options."
+  width=60%}
+```
+
+![A second figure.](https://quarto.org/docs/authoring/elephant.png){#fig-elephant2
+  fig-notes="Replication of @fig-elephant from @sec-basic, following @knuth1984. See @sec-options for available options."
+  width=60%}
+
+# Custom title and scale {#sec-options}
+
+Per-figure overrides via `fig-notes-title` and `fig-notes-scale`:
+
+```markdown
+![Another figure.](elephant.png){#fig-elephant3
+  fig-cap="Another figure."
+  fig-notes="Sample of 1,234 observations."
+  fig-notes-title="Source:"
+  fig-notes-scale=0.8
+  width=60%}
+```
+
+![Another figure.](https://quarto.org/docs/authoring/elephant.png){#fig-elephant3
+  fig-cap="Another figure."
+  fig-notes="Sample of 1,234 observations."
+  fig-notes-title="Source:"
+  fig-notes-scale=0.8
+  width=60%}
+
+Document-wide defaults can also be set in YAML front matter:
+
+```yaml
+fig-notes-title: "Notes:"
+fig-notes-scale: 0.9
+```
+
+::: {#refs}
+:::
