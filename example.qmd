@@ -1,10 +1,17 @@
 ---
 title: "quarto-notes-filter example"
-format: html
+format:
+  html: default
+  pdf: default
+  typst:
+    include-in-header:
+      text: |
+        #set bibliography(title: [References])
 filters:
   - quarto-notes-filter
 bibliography: references.bib
 bibliographystyle: chicago-author-date
+reference-section-title: References
 number-sections: true
 ---
 
@@ -17,7 +24,7 @@ quarto render example.qmd --to pdf
 quarto render example.qmd --to typst
 ```
 
-# Basic usage {#sec-basic}
+## Basic usage {#sec-basic}
 
 Add a `fig-notes` attribute to any figure and an AER-style "Notes:" line
 is rendered below the caption. The source for @fig-elephant below is:
@@ -38,7 +45,7 @@ which renders as:
 
 See @fig-elephant.
 
-# Cross-references and citations work inside notes {#sec-refs}
+## Cross-references and citations work inside notes {#sec-refs}
 
 The `fig-notes` content is parsed as Markdown and runs through Quarto's
 usual citeproc + crossref pipeline, so you can use `@sec-x`, `@fig-x`,
@@ -55,7 +62,7 @@ and `@cite-key` inside notes just like in regular text:
   fig-notes="Replication of @fig-elephant from @sec-basic, following @knuth1984. See @sec-options for available options."
   width=60%}
 
-# Custom title and scale {#sec-options}
+## Custom title and scale {#sec-options}
 
 Per-figure overrides via `fig-notes-title` and `fig-notes-scale`:
 
@@ -80,7 +87,47 @@ Document-wide defaults can also be set in YAML front matter:
 ```yaml
 fig-notes-title: "Notes:"
 fig-notes-scale: 0.9
+tbl-notes-title: "Notes:"
+tbl-notes-scale: 0.9
 ```
 
-::: {#refs}
-:::
+## Table notes {#sec-tables}
+
+The same attribute is available for Markdown tables as `tbl-notes`, which
+mirrors the `notes` option of the `tinytable` package: the note is
+rendered as the final row of the table itself, flush against the bottom
+rule.
+
+```markdown
+| fruit  | price  |
+|--------|--------|
+| apple  | 2.05   |
+| pear   | 1.37   |
+| orange | 3.09   |
+
+: Fruit prices. {#tbl-fruit
+  tbl-notes="Prices follow the conventions of @knuth1984. See
+  @sec-basic for the corresponding figure."}
+```
+
+| fruit  | price  |
+|--------|--------|
+| apple  | 2.05   |
+| pear   | 1.37   |
+| orange | 3.09   |
+
+: Fruit prices. {#tbl-fruit tbl-notes="Prices follow the conventions of @knuth1984. See @sec-basic for the corresponding figure."}
+
+See @tbl-fruit. Per-table `tbl-notes-title` and `tbl-notes-scale`
+overrides work just like the figure variants:
+
+| Col1 | Col2 | Col3 |
+|------|------|------|
+| A    | B    | C    |
+| E    | F    | G    |
+| A    | G    | G    |
+
+: My caption. {#tbl-letters
+  tbl-notes="Reproduced from @lamport1994. See @sec-options."
+  tbl-notes-title="Source:"
+  tbl-notes-scale=0.8}

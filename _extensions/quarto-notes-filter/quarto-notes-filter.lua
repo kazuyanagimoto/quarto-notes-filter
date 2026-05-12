@@ -2,34 +2,51 @@
 --[[
 quarto-notes-filter
 -------------------
-Adds AER-style "Notes:" text below a figure caption.
+Adds AER-style "Notes:" text below a figure caption or a table.
 
 Usage
 -----
-Static figure:
+Figure:
   ![Caption](img.png){#fig-x fig-notes="Source: ..." fig-notes-title="Notes:"}
 
-Executable cell (Quarto passes fig-* chunk options through to the figure's
-underlying image):
+Executable cell producing a figure:
   #| fig-cap: "My caption"
   #| fig-notes: "Source: ..."
 
+Markdown table:
+  | a | b |
+  |---|---|
+  | 1 | 2 |
+
+  : Caption {#tbl-x tbl-notes="Source: ..." tbl-notes-title="Notes:"}
+
 Document-level defaults (YAML front matter):
   fig-notes-title: "Notes:"   # default "Notes:"
-  fig-notes-scale: 0.9        # default 0.9 (fraction of body fontsize, AER-style)
+  fig-notes-scale: 0.9        # default 0.9 (fraction of body fontsize)
+  tbl-notes-title: "Notes:"   # default "Notes:"
+  tbl-notes-scale: 0.9        # default 0.9
 ]]
 
-local default_title = "Notes:"
-local default_scale = 0.9
+local default_fig_title = "Notes:"
+local default_fig_scale = 0.9
+local default_tbl_title = "Notes:"
+local default_tbl_scale = 0.9
 
 -- Document-level defaults.
 function Meta(meta)
   if meta["fig-notes-title"] ~= nil then
-    default_title = pandoc.utils.stringify(meta["fig-notes-title"])
+    default_fig_title = pandoc.utils.stringify(meta["fig-notes-title"])
   end
   if meta["fig-notes-scale"] ~= nil then
     local s = tonumber(pandoc.utils.stringify(meta["fig-notes-scale"]))
-    if s ~= nil then default_scale = s end
+    if s ~= nil then default_fig_scale = s end
+  end
+  if meta["tbl-notes-title"] ~= nil then
+    default_tbl_title = pandoc.utils.stringify(meta["tbl-notes-title"])
+  end
+  if meta["tbl-notes-scale"] ~= nil then
+    local s = tonumber(pandoc.utils.stringify(meta["tbl-notes-scale"]))
+    if s ~= nil then default_tbl_scale = s end
   end
 end
 
@@ -51,12 +68,13 @@ end
 -- notes content is passed through as real Pandoc Inlines (rather than
 -- being pre-serialized via `pandoc.write`) so that any `Cite` or
 -- cross-reference inlines survive intact and are later resolved by
--- Quarto's citeproc / crossref filters.
-local function build_typst_notes(title, notes_inlines, scale)
+-- Quarto's citeproc / crossref filters. `above_em` controls the gap
+-- above the notes block.
+local function build_typst_notes(title, notes_inlines, scale, above_em)
   local title_typ = typst_escape(title)
   local open = pandoc.RawInline("typst", string.format(
-    "\n#block(width: 100%%, above: 1.5em, below: 0em)[#align(left)[#text(size: %sem)[#emph[%s] ",
-    tostring(scale), title_typ
+    "\n#block(width: 100%%, above: %sem, below: 0em)[#align(left)[#text(size: %sem)[#emph[%s] ",
+    tostring(above_em), tostring(scale), title_typ
   ))
   local close = pandoc.RawInline("typst", "]]]")
   local result = pandoc.Inlines({ open })
@@ -88,11 +106,9 @@ local function latex_escape(s)
            :gsub("%^", "\\textasciicircum{}"))
 end
 
--- Build a list of Inlines that renders the notes line in LaTeX. As with
--- the Typst variant, the notes content is left as real Pandoc Inlines
--- so that `Cite` / cross-reference inlines are resolved later by
--- Quarto's citeproc / crossref filters.
-local function build_latex_notes(title, notes_inlines, scale)
+-- Build LaTeX notes Inlines intended to be injected at the end of a
+-- figure caption.
+local function build_latex_fig_notes(title, notes_inlines, scale)
   local title_tex = latex_escape(title)
   local size_cmd = latex_size_cmd(scale)
   local open = pandoc.RawInline("latex", string.format(
@@ -116,8 +132,6 @@ local latex_captionsetup_injected = false
 -- multi-line content, and the `caption` package's default multi-line
 -- behavior is to hang-indent under the label ("Figure N:"), which
 -- would push the notes paragraph in from the figure's left edge.
--- The ragged-right setup keeps both the caption text and the notes
--- flush at the figure's left edge.
 local function inject_latex_captionsetup()
   if latex_captionsetup_injected then return end
   latex_captionsetup_injected = true
@@ -135,18 +149,18 @@ local function html_escape(s)
            :gsub(">", "&gt;"))
 end
 
--- Build a list of Inlines that renders the notes line in HTML. As with
--- the Typst / LaTeX variants, the notes content stays as real Pandoc
--- Inlines so that `Cite` / cross-reference inlines are resolved later.
-local function build_html_notes(title, notes_inlines, scale)
+-- Build HTML notes Inlines. `class_name` lets callers distinguish
+-- figure-notes vs table-notes for CSS purposes; `above_em` controls
+-- the top margin.
+local function build_html_notes(title, notes_inlines, scale, class_name, above_em)
   local title_html = html_escape(title)
   local style = string.format(
-    "margin-top:1.5em;text-align:left;font-size:%sem;",
-    tostring(scale)
+    "margin-top:%sem;text-align:left;font-size:%sem;",
+    tostring(above_em), tostring(scale)
   )
   local open = pandoc.RawInline("html", string.format(
-    '<div class="quarto-figure-notes" style="%s"><em>%s</em> ',
-    style, title_html
+    '<div class="%s" style="%s"><em>%s</em> ',
+    class_name, style, title_html
   ))
   local close = pandoc.RawInline("html", "</div>")
   local result = pandoc.Inlines({ open })
@@ -155,6 +169,31 @@ local function build_html_notes(title, notes_inlines, scale)
   return result
 end
 
+-- Build Inlines that go *inside* a table foot cell (i.e. a cell
+-- spanning all columns), to be appended at the very bottom of the
+-- table -- in the spirit of `tinytable`'s `notes` option: the note
+-- sits directly beneath the table's bottom rule with no gap, rather
+-- than floating below the entire `table` environment.
+local function build_tbl_foot_inlines(title, notes_inlines, scale, format)
+  local result = pandoc.Inlines({})
+  if format == "latex" then
+    local size_cmd = latex_size_cmd(scale)
+    result:insert(pandoc.RawInline("latex", string.format(
+      "%s\\emph{%s} ", size_cmd, latex_escape(title))))
+    for _, inl in ipairs(notes_inlines) do result:insert(inl) end
+  elseif format == "typst" then
+    result:insert(pandoc.RawInline("typst", string.format(
+      "#text(size: %sem)[#emph[%s] ",
+      tostring(scale), typst_escape(title))))
+    for _, inl in ipairs(notes_inlines) do result:insert(inl) end
+    result:insert(pandoc.RawInline("typst", "]"))
+  elseif format == "html" then
+    result:insert(pandoc.RawInline("html",
+      string.format("<em>%s</em> ", html_escape(title))))
+    for _, inl in ipairs(notes_inlines) do result:insert(inl) end
+  end
+  return result
+end
 
 local function find_image(blocks)
   if blocks == nil then return nil end
@@ -171,7 +210,23 @@ local function find_image(blocks)
   return nil
 end
 
-function FloatRefTarget(float)
+-- Append a list of Inlines to the float's caption (figure case).
+local function append_to_caption(float, inlines)
+  if float.caption_long == nil then
+    float.caption_long = pandoc.Plain(inlines)
+    return
+  end
+  if float.caption_long.t == "Plain" or float.caption_long.t == "Para" then
+    for _, inl in ipairs(inlines) do
+      float.caption_long.content:insert(inl)
+    end
+    return
+  end
+  float.caption_long.content:insert(pandoc.Plain(inlines))
+end
+
+-- Handle a figure float with fig-notes set on its image.
+local function handle_figure(float)
   local content_blocks = quarto.utils.as_blocks(float.content)
   local img = find_image(content_blocks)
   if img == nil then return nil end
@@ -179,47 +234,129 @@ function FloatRefTarget(float)
   local notes_raw = img.attributes["fig-notes"]
   if notes_raw == nil or notes_raw == "" then return nil end
 
-  local title = img.attributes["fig-notes-title"] or default_title
-  local scale = tonumber(img.attributes["fig-notes-scale"] or "") or default_scale
+  local title = img.attributes["fig-notes-title"] or default_fig_title
+  local scale = tonumber(img.attributes["fig-notes-scale"] or "") or default_fig_scale
 
-  -- Strip handled attributes so they don't leak into output.
   img.attributes["fig-notes"] = nil
   img.attributes["fig-notes-title"] = nil
   img.attributes["fig-notes-scale"] = nil
 
   local notes_inlines = parse_inlines(notes_raw)
 
-  local function append_inlines(inlines)
-    if float.caption_long == nil then
-      float.caption_long = pandoc.Plain(inlines)
-      return
-    end
-    if float.caption_long.t == "Plain" or float.caption_long.t == "Para" then
-      for _, inl in ipairs(inlines) do
-        float.caption_long.content:insert(inl)
-      end
-      return
-    end
-    -- caption_long is a Div or block list; append as a Plain block.
-    float.caption_long.content:insert(pandoc.Plain(inlines))
-  end
-
   if quarto.doc.is_format("typst") then
-    append_inlines(build_typst_notes(title, notes_inlines, scale))
+    append_to_caption(float, build_typst_notes(title, notes_inlines, scale, 1.5))
     return float
   end
 
   if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
     inject_latex_captionsetup()
-    append_inlines(build_latex_notes(title, notes_inlines, scale))
+    append_to_caption(float, build_latex_fig_notes(title, notes_inlines, scale))
     return float
   end
 
   if quarto.doc.is_format("html") then
-    append_inlines(build_html_notes(title, notes_inlines, scale))
+    append_to_caption(float,
+      build_html_notes(title, notes_inlines, scale, "quarto-figure-notes", 1.5))
     return float
   end
 
   return nil
 end
 
+-- Recursively find the first Table block inside a list of blocks.
+local function find_table(blocks)
+  if blocks == nil then return nil end
+  for _, b in ipairs(blocks) do
+    if b.t == "Table" then return b end
+    if b.content then
+      local r = find_table(b.content)
+      if r then return r end
+    end
+  end
+  return nil
+end
+
+-- Handle a table float with tbl-notes set on its attributes. Unlike
+-- figures, the notes are appended as a final row inside the table's
+-- foot (TableFoot), so they sit flush against the bottom rule -- in
+-- the spirit of `tinytable`'s `notes` option (LaTeX `\multicolumn`
+-- inside the tabular, HTML `<tfoot>`, Typst grid footer).
+local function handle_table(float)
+  local notes_raw = float.attributes["tbl-notes"]
+  if notes_raw == nil or notes_raw == "" then return nil end
+
+  local title = float.attributes["tbl-notes-title"] or default_tbl_title
+  local scale = tonumber(float.attributes["tbl-notes-scale"] or "") or default_tbl_scale
+
+  float.attributes["tbl-notes"] = nil
+  float.attributes["tbl-notes-title"] = nil
+  float.attributes["tbl-notes-scale"] = nil
+
+  local content_blocks = quarto.utils.as_blocks(float.content)
+  local tbl = find_table(content_blocks)
+  if tbl == nil then return nil end
+
+  local notes_inlines = parse_inlines(notes_raw)
+  local ncols = #tbl.colspecs
+  if ncols < 1 then ncols = 1 end
+
+  local format
+  if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
+    format = "latex"
+  elseif quarto.doc.is_format("typst") then
+    format = "typst"
+  elseif quarto.doc.is_format("html") then
+    format = "html"
+  else
+    return nil
+  end
+
+  local cell_inlines = build_tbl_foot_inlines(title, notes_inlines, scale, format)
+
+  -- HTML: style the cell directly so the note row is left-aligned,
+  -- smaller, and has no top border (sits flush against the bottom of
+  -- the body rows).
+  local cell_attr = pandoc.Attr()
+  if format == "html" then
+    cell_attr = pandoc.Attr("", { "quarto-table-notes" }, {
+      { "style", string.format(
+        "text-align:left;font-size:%sem;border-top:none;",
+        tostring(scale)) },
+    })
+  end
+
+  local cell = pandoc.Cell(
+    { pandoc.Plain(cell_inlines) },
+    pandoc.AlignLeft, 1, ncols, cell_attr)
+  local row = pandoc.Row({ cell })
+  tbl.foot.rows:insert(row)
+
+  -- Without explicit column widths, a long single-line note in the
+  -- footer cell can stretch only the bottom rule (LaTeX) or push the
+  -- whole table wider while leaving data columns natural-width (Typst),
+  -- producing a layout where the data block and the notes row visibly
+  -- disagree, and where LaTeX and Typst outputs diverge depending on
+  -- the note length. Normalising `colspecs` to equal fractions makes
+  -- every writer (LaTeX `p{}` columns, Typst `columns: (1fr, 1fr, ...)`,
+  -- HTML percentage widths) lay out the table at the full available
+  -- text width, so data columns stretch, the note wraps within that
+  -- width, and the three formats look the same regardless of the
+  -- length of the note.
+  local new_colspecs = {}
+  for i = 1, ncols do
+    local existing = tbl.colspecs[i]
+    local align = (existing and existing[1]) or pandoc.AlignDefault
+    new_colspecs[i] = { align, 1.0 / ncols }
+  end
+  tbl.colspecs = new_colspecs
+
+  float.content = content_blocks
+  return float
+end
+
+function FloatRefTarget(float)
+  if float.type == "Table" then
+    return handle_table(float)
+  end
+  return handle_figure(float)
+end
