@@ -456,9 +456,13 @@ end
 
 -- Run the cell-Div stashing pass first, then the float-handling pass,
 -- so that `pending_fig_notes` is populated before `FloatRefTarget` is
--- invoked for the corresponding figure.
+-- invoked for the corresponding figure. `Meta` must run in the first
+-- pass: within a single pass pandoc processes block elements before
+-- metadata, so putting `Meta` alongside `FloatRefTarget` would update
+-- the document-level defaults only after every float had already been
+-- rendered with the hardcoded ones.
 return {
-  { Div = stash_cell_div_notes },
+  { Div = stash_cell_div_notes, Meta = Meta },
   {
     FloatRefTarget = function(float)
       if float.type == "Table" then
@@ -466,6 +470,5 @@ return {
       end
       return handle_figure(float)
     end,
-    Meta = Meta,
   },
 }
