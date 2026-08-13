@@ -9,12 +9,18 @@ Quarto does not currently provide this out of the box (see
 [quarto-dev/quarto-cli#7514](https://github.com/quarto-dev/quarto-cli/issues/7514)).
 This extension fills that gap.
 
-**Supported formats:** Typst, LaTeX/PDF, HTML.
+| HTML | LaTeX (PDF) |
+| :--: | :---------: |
+| ![HTML output](images/example-html.png) | ![LaTeX PDF output](images/example-pdf.png) |
+
+| Typst | Word (docx) |
+| :---: | :---------: |
+| ![Typst output](images/example-typst.png) | ![Word output](images/example-docx.png) |
 
 ## Installing
 
 ```bash
-quarto add Kazuharu-Yanagimoto/quarto-notes-filter
+quarto add kazuyanagimoto/quarto-notes-filter
 ```
 
 ## Usage
@@ -91,16 +97,28 @@ mapped to a standard LaTeX size command (at a 10pt body):
 
 The AER-style default `0.9` therefore renders as `\small`.
 
+### Word (docx) styling
+
+OOXML has no inline construct that rescales a run of arbitrary content,
+so `fig-notes-scale` / `tbl-notes-scale` are not applied in Word output.
+Instead, the notes are wrapped in a character style — `Figure Notes` for
+figures and `Table Notes` for tables — which you can define in a
+[reference-doc](https://quarto.org/docs/reference/formats/docx.html#format-options)
+to control the font size and appearance. Without a reference-doc the
+notes inherit the surrounding caption / table formatting, with the title
+in italics.
+
 ## Example
 
 See [example.qmd](example.qmd) for a complete example that renders to all
-three supported formats and demonstrates cross-references and citations
+four supported formats and demonstrates cross-references and citations
 inside notes:
 
 ```bash
 quarto render example.qmd --to html
 quarto render example.qmd --to pdf
 quarto render example.qmd --to typst
+quarto render example.qmd --to docx
 ```
 
 ## License

@@ -169,6 +169,32 @@ local function build_html_notes(title, notes_inlines, scale, class_name, above_e
   return result
 end
 
+-- Build the notes content as a Span carrying a `custom-style` character
+-- style, for Word (docx) output. OOXML has no inline construct that can
+-- rescale a run of arbitrary following content (unlike HTML's inline
+-- CSS or Typst's `#text(size: ...)`), so `*-notes-scale` cannot be
+-- applied directly; instead users can define the character style
+-- ("Figure Notes" / "Table Notes") in a reference-doc to control the
+-- font size and appearance.
+local function build_docx_notes_span(title, notes_inlines, style_name)
+  local content = pandoc.Inlines({
+    pandoc.Emph(pandoc.Str(title)),
+    pandoc.Space(),
+  })
+  for _, inl in ipairs(notes_inlines) do content:insert(inl) end
+  return pandoc.Span(content,
+    pandoc.Attr("", {}, { ["custom-style"] = style_name }))
+end
+
+-- Build docx notes Inlines intended to be injected at the end of a
+-- figure caption: a line break, then the styled notes span.
+local function build_docx_fig_notes(title, notes_inlines)
+  return pandoc.Inlines({
+    pandoc.LineBreak(),
+    build_docx_notes_span(title, notes_inlines, "Figure Notes"),
+  })
+end
+
 -- Build Inlines that go *inside* a table foot cell (i.e. a cell
 -- spanning all columns), to be appended at the very bottom of the
 -- table -- in the spirit of `tinytable`'s `notes` option: the note
@@ -191,6 +217,8 @@ local function build_tbl_foot_inlines(title, notes_inlines, scale, format)
     result:insert(pandoc.RawInline("html",
       string.format("<em>%s</em> ", html_escape(title))))
     for _, inl in ipairs(notes_inlines) do result:insert(inl) end
+  elseif format == "docx" then
+    result:insert(build_docx_notes_span(title, notes_inlines, "Table Notes"))
   end
   return result
 end
@@ -210,6 +238,14 @@ local function find_image(blocks)
   return nil
 end
 
+-- Side table populated by the `Div` pass for executable code cells,
+-- keyed by the figure identifier (e.g. "fig-scatter"). Quarto silently
+-- strips unrecognised attributes such as `fig-notes` from the image
+-- element while constructing the float, so we have to stash the
+-- attribute values out-of-band and look them up again in
+-- `FloatRefTarget` by the float's identifier.
+local pending_fig_notes = {}
+
 -- Append a list of Inlines to the float's caption (figure case).
 local function append_to_caption(float, inlines)
   if float.caption_long == nil then
@@ -225,21 +261,51 @@ local function append_to_caption(float, inlines)
   float.caption_long.content:insert(pandoc.Plain(inlines))
 end
 
--- Handle a figure float with fig-notes set on its image.
+-- Handle a figure float with fig-notes set on its image (markdown image
+-- syntax), on the float itself, or stashed by the `Div` pass for
+-- executable code cells.
 local function handle_figure(float)
   local content_blocks = quarto.utils.as_blocks(float.content)
   local img = find_image(content_blocks)
-  if img == nil then return nil end
 
-  local notes_raw = img.attributes["fig-notes"]
-  if notes_raw == nil or notes_raw == "" then return nil end
+  -- Resolve the source of the notes attributes, in priority order:
+  --   1. the image's own attributes (markdown `![](...){fig-notes=...}`)
+  --   2. the float's attributes
+  --   3. attributes captured by the `Div` pass from a wrapping `.cell`
+  --      Div produced by an executable code cell, looked up by the
+  --      inner image's `src` (since Quarto strips the image identifier
+  --      and discards unknown image attributes during float
+  --      construction, but the image src is preserved).
+  local attr_holder = nil
+  local pending = nil
+  if img ~= nil and img.attributes["fig-notes"] ~= nil
+      and img.attributes["fig-notes"] ~= "" then
+    attr_holder = img.attributes
+  elseif float.attributes ~= nil
+      and float.attributes["fig-notes"] ~= nil
+      and float.attributes["fig-notes"] ~= "" then
+    attr_holder = float.attributes
+  elseif img ~= nil and img.src ~= nil
+      and pending_fig_notes[img.src] ~= nil then
+    pending = pending_fig_notes[img.src]
+    pending_fig_notes[img.src] = nil
+  else
+    return nil
+  end
 
-  local title = img.attributes["fig-notes-title"] or default_fig_title
-  local scale = tonumber(img.attributes["fig-notes-scale"] or "") or default_fig_scale
-
-  img.attributes["fig-notes"] = nil
-  img.attributes["fig-notes-title"] = nil
-  img.attributes["fig-notes-scale"] = nil
+  local notes_raw, title, scale
+  if pending ~= nil then
+    notes_raw = pending.notes
+    title = pending.title or default_fig_title
+    scale = tonumber(pending.scale or "") or default_fig_scale
+  else
+    notes_raw = attr_holder["fig-notes"]
+    title = attr_holder["fig-notes-title"] or default_fig_title
+    scale = tonumber(attr_holder["fig-notes-scale"] or "") or default_fig_scale
+    attr_holder["fig-notes"] = nil
+    attr_holder["fig-notes-title"] = nil
+    attr_holder["fig-notes-scale"] = nil
+  end
 
   local notes_inlines = parse_inlines(notes_raw)
 
@@ -251,6 +317,11 @@ local function handle_figure(float)
   if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
     inject_latex_captionsetup()
     append_to_caption(float, build_latex_fig_notes(title, notes_inlines, scale))
+    return float
+  end
+
+  if quarto.doc.is_format("docx") then
+    append_to_caption(float, build_docx_fig_notes(title, notes_inlines))
     return float
   end
 
@@ -305,6 +376,8 @@ local function handle_table(float)
     format = "latex"
   elseif quarto.doc.is_format("typst") then
     format = "typst"
+  elseif quarto.doc.is_format("docx") then
+    format = "docx"
   elseif quarto.doc.is_format("html") then
     format = "html"
   else
@@ -354,9 +427,45 @@ local function handle_table(float)
   return float
 end
 
-function FloatRefTarget(float)
-  if float.type == "Table" then
-    return handle_table(float)
+-- For executable code cells (e.g. R/Python chunks producing a figure),
+-- Quarto wraps the generated image in a `.cell` Div and attaches the
+-- chunk options to that Div. Capture any `fig-notes*` attributes here
+-- (before Quarto's crossref pass moves the identifier off the image
+-- and discards unknown image attributes), keyed by the inner image's
+-- `src` so `FloatRefTarget` can recover them.
+local function stash_cell_div_notes(div)
+  local notes = div.attributes["fig-notes"]
+  if notes == nil or notes == "" then return nil end
+
+  local img = find_image(div.content)
+  if img == nil or img.src == nil or img.src == "" then
+    return nil
   end
-  return handle_figure(float)
+
+  pending_fig_notes[img.src] = {
+    notes = notes,
+    title = div.attributes["fig-notes-title"],
+    scale = div.attributes["fig-notes-scale"],
+  }
+
+  div.attributes["fig-notes"] = nil
+  div.attributes["fig-notes-title"] = nil
+  div.attributes["fig-notes-scale"] = nil
+  return div
 end
+
+-- Run the cell-Div stashing pass first, then the float-handling pass,
+-- so that `pending_fig_notes` is populated before `FloatRefTarget` is
+-- invoked for the corresponding figure.
+return {
+  { Div = stash_cell_div_notes },
+  {
+    FloatRefTarget = function(float)
+      if float.type == "Table" then
+        return handle_table(float)
+      end
+      return handle_figure(float)
+    end,
+    Meta = Meta,
+  },
+}

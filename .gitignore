@@ -1,7 +1,12 @@
 *.html
 *.pdf
+*.docx
 *_files/
 .quarto/
 
 /.quarto/
 **/*.quarto_ipynb
+
+/.luarc.json
+
+.DS_Store

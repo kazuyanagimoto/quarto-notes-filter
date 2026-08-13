@@ -7,6 +7,7 @@ format:
     include-in-header:
       text: |
         #set bibliography(title: [References])
+  docx: default
 filters:
   - quarto-notes-filter
 bibliography: references.bib
@@ -16,12 +17,13 @@ number-sections: true
 ---
 
 This example demonstrates the `quarto-notes-filter` extension across the
-three supported output formats. Render it with any of:
+four supported output formats. Render it with any of:
 
 ```bash
 quarto render example.qmd --to html
 quarto render example.qmd --to pdf
 quarto render example.qmd --to typst
+quarto render example.qmd --to docx
 ```
 
 ## Basic usage {#sec-basic}
@@ -90,6 +92,27 @@ fig-notes-scale: 0.9
 tbl-notes-title: "Notes:"
 tbl-notes-scale: 0.9
 ```
+
+## Working with Code
+
+````markdown
+```{.r}
+#| label: fig-scatter
+#| fig-cap: "A scatter plot."
+#| fig-notes: "This figure demonstrates a scatter plot."
+#| echo: false
+plot(mtcars$mpg, mtcars$hp)
+```
+````
+
+```{r}
+#| label: fig-scatter
+#| fig-cap: "A scatter plot."
+#| fig-notes: "This figure demonstrates a scatter plot."
+#| echo: false
+plot(mtcars$mpg, mtcars$hp)
+```
+
 
 ## Table notes {#sec-tables}
 
