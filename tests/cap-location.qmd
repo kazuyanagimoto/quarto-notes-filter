@@ -1,0 +1,35 @@
+---
+title: "Document-level fig-cap-location: top"
+fig-cap-location: top
+format:
+  html: default
+  latex: default
+  typst:
+    keep-typ: true
+  docx: default
+filters:
+  - quarto-notes-filter
+---
+
+## Markdown figure
+
+![A caption on top.](scatter.png){#fig-md
+  fig-notes="Markdown-figure notes should stay at the bottom."
+  width=60%}
+
+## Executable cell
+
+```{r}
+#| label: fig-chunk
+#| fig-cap: "Chunk caption on top."
+#| fig-notes: "Chunk notes should stay at the bottom."
+#| echo: false
+plot(mtcars$mpg, mtcars$hp)
+```
+
+## Notes forced to the top
+
+![Caption on top, notes on top too.](scatter.png){#fig-top
+  fig-notes="These notes ride with the top caption."
+  fig-notes-location="top"
+  width=60%}

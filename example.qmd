@@ -89,8 +89,36 @@ Document-wide defaults can also be set in YAML front matter:
 ```yaml
 fig-notes-title: "Notes:"
 fig-notes-scale: 0.9
+fig-notes-location: bottom
 tbl-notes-title: "Notes:"
 tbl-notes-scale: 0.9
+```
+
+## Caption on top {#sec-cap-top}
+
+The notes location (`fig-notes-location`, default `bottom`) is
+independent of the caption location, so with `fig-cap-location: top`
+(document-level or as a chunk option) the caption moves above the
+figure while the notes stay at the bottom:
+
+````markdown
+```{{r}}
+#| label: fig-cap-top
+#| fig-cap: "A scatter plot with the caption on top."
+#| fig-cap-location: top
+#| fig-notes: "The notes remain at the bottom of the figure."
+#| echo: false
+plot(mtcars$mpg, mtcars$hp)
+```
+````
+
+```{r}
+#| label: fig-cap-top
+#| fig-cap: "A scatter plot with the caption on top."
+#| fig-cap-location: top
+#| fig-notes: "The notes remain at the bottom of the figure."
+#| echo: false
+plot(mtcars$mpg, mtcars$hp)
 ```
 
 ## Working with Code

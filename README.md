@@ -67,6 +67,7 @@ plot(1:10)
 | `fig-notes`       | per-figure            | _(none)_   | Notes text for a figure. Inline Markdown, cross-references (`@sec-x`, `@fig-x`), and citations (`@cite-key`) are supported. Rendered below the caption. |
 | `fig-notes-title` | per-figure / document | `"Notes:"` | Prefix shown before the figure notes, rendered in italics.                                                                                              |
 | `fig-notes-scale` | per-figure / document | `0.9`      | Font size of figure notes relative to body text (i.e., `0.9em`, AER-style).                                                                             |
+| `fig-notes-location` | per-figure / document | `"bottom"` | Vertical position of the figure notes: `bottom` or `top`. Independent of `fig-cap-location`, so with `fig-cap-location: top` the notes still stay at the bottom of the figure.  |
 | `tbl-notes`       | per-table             | _(none)_   | Notes text for a table. Same Markdown / crossref / citation support as `fig-notes`. Rendered below the table.                                           |
 | `tbl-notes-title` | per-table / document  | `"Notes:"` | Prefix shown before the table notes, rendered in italics.                                                                                               |
 | `tbl-notes-scale` | per-table / document  | `0.9`      | Font size of table notes relative to body text.                                                                                                         |
@@ -76,11 +77,35 @@ Document-level defaults go in the YAML front matter:
 ```yaml
 fig-notes-title: "Notes:"
 fig-notes-scale: 0.9
+fig-notes-location: bottom
 tbl-notes-title: "Notes:"
 tbl-notes-scale: 0.9
 ```
 
 Per-figure / per-table values override document-level defaults.
+
+### Caption on top
+
+The notes location is decoupled from the caption location. With
+`fig-cap-location: top` (document-level or as a chunk option) the
+caption moves above the figure while the notes remain at the bottom:
+
+````markdown
+```{r}
+#| label: fig-x
+#| fig-cap: "A caption."
+#| fig-cap-location: top
+#| fig-notes: "Source: Doe (2024)."
+plot(1:10)
+```
+````
+
+Set `fig-notes-location: top` if you instead want the notes to sit at
+the top of the figure alongside a top caption. When notes and caption
+share a location, the notes are rendered directly after the caption.
+
+Table notes are unaffected by `tbl-cap-location`: they are always part
+of the table's footer, flush against the bottom rule.
 
 ### LaTeX size mapping
 
@@ -120,6 +145,19 @@ quarto render example.qmd --to pdf
 quarto render example.qmd --to typst
 quarto render example.qmd --to docx
 ```
+
+## Tests
+
+The [tests/](tests/) folder contains test documents and a runner that
+renders them to all supported formats and asserts the position of the
+notes relative to the caption and the figure:
+
+```bash
+python3 tests/run.py
+```
+
+The folder is excluded from the installed extension via
+[.quartoignore](.quartoignore).
 
 ## License
 

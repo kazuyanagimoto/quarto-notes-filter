@@ -21,14 +21,17 @@ Markdown table:
   : Caption {#tbl-x tbl-notes="Source: ..." tbl-notes-title="Notes:"}
 
 Document-level defaults (YAML front matter):
-  fig-notes-title: "Notes:"   # default "Notes:"
-  fig-notes-scale: 0.9        # default 0.9 (fraction of body fontsize)
-  tbl-notes-title: "Notes:"   # default "Notes:"
-  tbl-notes-scale: 0.9        # default 0.9
+  fig-notes-title: "Notes:"     # default "Notes:"
+  fig-notes-scale: 0.9          # default 0.9 (fraction of body fontsize)
+  fig-notes-location: bottom    # default "bottom"; "top" puts notes above
+  tbl-notes-title: "Notes:"     # default "Notes:"
+  tbl-notes-scale: 0.9          # default 0.9
 ]]
 
 local default_fig_title = "Notes:"
 local default_fig_scale = 0.9
+local default_fig_notes_location = "bottom"
+local default_fig_cap_location = "bottom"
 local default_tbl_title = "Notes:"
 local default_tbl_scale = 0.9
 
@@ -40,6 +43,15 @@ function Meta(meta)
   if meta["fig-notes-scale"] ~= nil then
     local s = tonumber(pandoc.utils.stringify(meta["fig-notes-scale"]))
     if s ~= nil then default_fig_scale = s end
+  end
+  if meta["fig-notes-location"] ~= nil then
+    default_fig_notes_location = pandoc.utils.stringify(meta["fig-notes-location"])
+  end
+  -- Track where Quarto will place figure captions, so the notes can be
+  -- decoupled from the caption when the two locations differ.
+  local cap_loc = meta["fig-cap-location"] or meta["cap-location"]
+  if cap_loc ~= nil then
+    default_fig_cap_location = pandoc.utils.stringify(cap_loc)
   end
   if meta["tbl-notes-title"] ~= nil then
     default_tbl_title = pandoc.utils.stringify(meta["tbl-notes-title"])
@@ -195,6 +207,37 @@ local function build_docx_fig_notes(title, notes_inlines)
   })
 end
 
+-- Build the notes as a standalone Block placed inside the float's
+-- content (not attached to the caption). Used when the notes location
+-- differs from the caption location, e.g. `fig-cap-location: top` with
+-- notes kept at the bottom of the figure.
+local function build_standalone_fig_notes(title, notes_inlines, scale)
+  if quarto.doc.is_format("typst") then
+    return pandoc.Plain(build_typst_notes(title, notes_inlines, scale, 0.8))
+  end
+  if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
+    local size_cmd = latex_size_cmd(scale)
+    local open = pandoc.RawInline("latex", string.format(
+      "\\par\\vspace{0.8ex}\\parbox[t]{\\linewidth}{\\raggedright %s\\emph{%s} ",
+      size_cmd, latex_escape(title)))
+    local close = pandoc.RawInline("latex", "}")
+    local inls = pandoc.Inlines({ open })
+    for _, inl in ipairs(notes_inlines) do inls:insert(inl) end
+    inls:insert(close)
+    return pandoc.Plain(inls)
+  end
+  if quarto.doc.is_format("docx") then
+    return pandoc.Para(pandoc.Inlines({
+      build_docx_notes_span(title, notes_inlines, "Figure Notes"),
+    }))
+  end
+  if quarto.doc.is_format("html") then
+    return pandoc.Plain(
+      build_html_notes(title, notes_inlines, scale, "quarto-figure-notes", 0.8))
+  end
+  return nil
+end
+
 -- Build Inlines that go *inside* a table foot cell (i.e. a cell
 -- spanning all columns), to be appended at the very bottom of the
 -- table -- in the spirit of `tinytable`'s `notes` option: the note
@@ -293,21 +336,50 @@ local function handle_figure(float)
     return nil
   end
 
-  local notes_raw, title, scale
+  -- A per-figure `fig-cap-location` (e.g. the `#| fig-cap-location:`
+  -- chunk option) is stored by Quarto on the float itself as a
+  -- `cap-location` attribute; fall back to the document-level default.
+  local cap_loc = default_fig_cap_location
+  if float.attributes ~= nil then
+    cap_loc = float.attributes["cap-location"]
+        or float.attributes["fig-cap-location"]
+        or cap_loc
+  end
+
+  local notes_raw, title, scale, notes_loc
   if pending ~= nil then
     notes_raw = pending.notes
     title = pending.title or default_fig_title
     scale = tonumber(pending.scale or "") or default_fig_scale
+    notes_loc = pending.location or default_fig_notes_location
   else
     notes_raw = attr_holder["fig-notes"]
     title = attr_holder["fig-notes-title"] or default_fig_title
     scale = tonumber(attr_holder["fig-notes-scale"] or "") or default_fig_scale
+    notes_loc = attr_holder["fig-notes-location"] or default_fig_notes_location
     attr_holder["fig-notes"] = nil
     attr_holder["fig-notes-title"] = nil
     attr_holder["fig-notes-scale"] = nil
+    attr_holder["fig-notes-location"] = nil
   end
 
   local notes_inlines = parse_inlines(notes_raw)
+
+  -- When the notes location differs from the caption location (e.g.
+  -- caption on top, notes at the bottom), the notes cannot ride along
+  -- with the caption; insert them as a standalone block inside the
+  -- float's content instead.
+  if notes_loc ~= cap_loc then
+    local block = build_standalone_fig_notes(title, notes_inlines, scale)
+    if block == nil then return nil end
+    if notes_loc == "top" then
+      content_blocks:insert(1, block)
+    else
+      content_blocks:insert(block)
+    end
+    float.content = content_blocks
+    return float
+  end
 
   if quarto.doc.is_format("typst") then
     append_to_caption(float, build_typst_notes(title, notes_inlines, scale, 1.5))
@@ -446,11 +518,13 @@ local function stash_cell_div_notes(div)
     notes = notes,
     title = div.attributes["fig-notes-title"],
     scale = div.attributes["fig-notes-scale"],
+    location = div.attributes["fig-notes-location"],
   }
 
   div.attributes["fig-notes"] = nil
   div.attributes["fig-notes-title"] = nil
   div.attributes["fig-notes-scale"] = nil
+  div.attributes["fig-notes-location"] = nil
   return div
 end
 
