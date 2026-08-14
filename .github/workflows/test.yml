@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Typst is bundled with Quarto, and the LaTeX checks only inspect
       # the generated .tex (no PDF compilation), so no TinyTeX needed.
